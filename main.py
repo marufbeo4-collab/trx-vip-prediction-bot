@@ -181,40 +181,119 @@ class PredictionEngine:
             self.history = self.history[:120]
             self.raw_history = self.raw_history[:120]
 
-    # ZigZag Hunter Logic
-    def get_pattern_signal(self, current_streak_loss):
-        if not self.history:
-            return random.choice(["BIG", "SMALL"])
-
-        last_result = self.history[0]
-        
-        # PHASE 1: ZIG-ZAG
-        if len(self.history) >= 2 and self.history[0] != self.history[1]:
-            if last_result == "BIG":
-                return "SMALL"
-            else:
-                return "BIG"
-
-        # PHASE 2: DRAGON
-        else:
-            return last_result
-
-        # PHASE 3: EMERGENCY FLIP
-        if current_streak_loss >= 2:
-            if last_result == "BIG":
-                return "SMALL" 
-            else: 
-                return "BIG"
-        
-        return last_result
-
     def calc_confidence(self, streak_loss):
+        # সাধারণ কনফিডেন্স লজিক
         base_conf = random.randint(90, 95)
         if streak_loss == 0:
-            return base_conf + random.randint(1, 4) # 96-99%
+            return base_conf + random.randint(1, 4)
         else:
-            return base_conf - random.randint(1, 5) # 85-94%
+            return base_conf - random.randint(1, 5)
 
+    def get_pattern_signal(self, current_streak_loss):
+        # ইতিহাস খুব ছোট হলে সেফটি র‍্যান্ডম
+        if len(self.history) < 15:
+            return random.choice(["BIG", "SMALL"])
+
+        h = self.history # শর্টকাট
+        votes = [] # ভোটের বাক্স
+
+        # =========================================================
+        # 🗳️ PART 1: TREND & PATTERN LOGICS
+        # =========================================================
+        
+        # 1. Trend Majority (গত ১২ পিরিয়ডে কে বেশি?)
+        last_12 = h[:12]
+        if last_12.count("BIG") > last_12.count("SMALL"): votes.append("BIG")
+        else: votes.append("SMALL")
+
+        # 2. Dragon Follower (লাস্ট রেজাল্ট কপি)
+        votes.append(h[0])
+
+        # 3. Streak Hunter (যদি টানা ৩টা একই থাকে)
+        if h[0] == h[1] == h[2]: votes.append(h[0])
+
+        # 4. Pattern AABB (2-2 Pattern)
+        if h[0] == h[1] and h[2] == h[3] and h[1] != h[2]:
+            votes.append("SMALL" if h[0] == "BIG" else "BIG")
+
+        # =========================================================
+        # ⚡ NEW: ZIGZAG BOOSTER (আপনার সমস্যার সমাধান)
+        # =========================================================
+        # যদি দেখি লাস্ট দুইটা রেজাল্ট আলাদা (যেমন: B, S), তার মানে জিগজ্যাগ চলছে।
+        # তখন আমরা "উল্টা" ভোটের পাওয়ার বাড়িয়ে দিব।
+        if h[0] != h[1]:
+            zigzag_vote = "SMALL" if h[0] == "BIG" else "BIG"
+            votes.append(zigzag_vote)
+            votes.append(zigzag_vote) # জিগজ্যাগ ডিটেক্ট হলে ডাবল ভোট
+            votes.append(zigzag_vote) # ট্রিপল ভোট যাতে ড্রাগন লজিককে হারানো যায়
+
+        # =========================================================
+        # 🧮 PART 2: MATHEMATICAL LOGICS
+        # =========================================================
+        try:
+            r_num = int(self.raw_history[0].get('number', 0))
+            p_digit = int(str(self.raw_history[0].get('issueNumber', 0))[-1])
+            prev_num = int(self.raw_history[1].get('number', 0))
+
+            # 5. Period + Number
+            votes.append("SMALL" if (p_digit + r_num) % 2 == 0 else "BIG")
+            # 6. Last 2 Numbers Sum
+            votes.append("SMALL" if (r_num + prev_num) % 2 == 0 else "BIG")
+            # 7. Number Direction
+            votes.append("BIG" if r_num >= 5 else "SMALL")
+        except: pass
+
+        # =========================================================
+        # 📜 PART 3: HISTORY MATCHING
+        # =========================================================
+        # বর্তমানে যে ৩টা রেজাল্ট আছে, অতীতে এমন হলে কী আসত?
+        current_pat = h[:3]
+        match_big, match_small = 0, 0
+        for i in range(1, len(h) - 3):
+            if h[i:i+3] == current_pat:
+                if h[i-1] == "BIG": match_big += 1
+                else: match_small += 1
+        
+        if match_big > match_small: votes.append("BIG")
+        elif match_small > match_big: votes.append("SMALL")
+
+        # =========================================================
+        # 🧠 PART 4: LOSS RECOVERY & VOTING
+        # =========================================================
+
+        # লস রিকভারি (টানা লস হলে উল্টা ভোটের জোর বাড়বে)
+        if current_streak_loss >= 2:
+            rec_vote = "SMALL" if self.last_prediction == "BIG" else "BIG"
+            votes.append(rec_vote)
+            votes.append(rec_vote)
+
+        # সব লজিকের ভোট গণনা
+        big_votes = votes.count("BIG")
+        small_votes = votes.count("SMALL")
+
+        if big_votes > small_votes:
+            prediction = "BIG"
+        elif small_votes > big_votes:
+            prediction = "SMALL"
+        else:
+            prediction = h[0]
+
+        # =========================================================
+        # 🛡️ EMERGENCY OVERRIDE (SMART FIX)
+        # =========================================================
+        # আগে এখানে শুধু h[0] ছিল, তাই জিগজ্যাগে ধরা খেত।
+        # এখন আমরা চেক করব: মার্কেট কি জিগজ্যাগ নাকি ড্রাগন?
+        
+        if current_streak_loss >= 4:
+            # যদি এখন জিগজ্যাগ চলে (লাস্ট ২টা আলাদা), তবে উল্টা ধরো
+            if h[0] != h[1]:
+                prediction = "SMALL" if h[0] == "BIG" else "BIG"
+            # আর যদি ড্রাগন চলে (লাস্ট ২টা এক), তবে সোজা ধরো
+            else:
+                prediction = h[0]
+
+        self.last_prediction = prediction
+        return prediction
 
 # =========================
 # BOT STATE
