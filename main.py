@@ -25,7 +25,7 @@ from telegram.ext import (
 # =========================
 # CONFIG (ONLY TOKEN YOU SET)
 # =========================
-BOT_TOKEN = "8385209285:AAFpGfbu-KNi5dDtT1AN_b3UtyxX9TWcIKw"  # <-- ONLY THIS YOU CHANGE
+BOT_TOKEN = "8385209285:AAEq-zFmIIeYqN6N7Krdf95LYZgvfprss6c"  # <-- ONLY THIS YOU CHANGE
 
 BRAND_NAME = "𝗧𝗥𝗫 𝗥𝗔𝗞𝗜𝗕 𝗩𝗜𝗣 𝗦𝗜𝗚𝗡𝗔𝗟🔥"
 CHANNEL_LINK = "https://t.me/TRX_RAKIB_trader"
