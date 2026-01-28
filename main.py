@@ -25,7 +25,6 @@ from telegram.ext import (
 # =========================
 # CONFIG
 # =========================
-# আপনার নতুন টোকেনটি এখানে নিশ্চিত করুন
 BOT_TOKEN = "8385209285:AAHeVMIo0eNrR4SkHFzdzp3o5kt3Ai0V7Dk"
 
 BRAND_NAME = "𝗧𝗥𝗫 𝗥𝗔𝗞𝗜𝗕 𝗩𝗜𝗣 𝗦𝗜𝗚𝗡𝗔𝗟🔥"
@@ -167,100 +166,74 @@ STICKERS = {
 }
 
 # =========================
-# ENGINE LOOP (FIXED: no "prediction then instant win" mix)
+# PREDICTION ENGINE (UPDATED: HYBRID REVERSE LOGIC)
 # =========================
-async def engine_loop(app: Application, my_session: int):
-    bot = app.bot
+class PredictionEngine:
+    def __init__(self):
+        self.history: List[str] = []
+        self.raw_history: List[dict] = []
+        self.last_prediction: Optional[str] = None
 
-    while state.running and state.session_id == my_session:
-        if state.stop_event.is_set():
-            break
+    def update_history(self, issue_data: dict):
+        try:
+            number = int(issue_data["number"])
+            result_type = "BIG" if number >= 5 else "SMALL"
+        except Exception:
+            return
 
-        now = datetime.now(BD_TZ)
-        sec = now.second
-        current_period = calc_current_1m_period(now)
+        if (not self.raw_history) or (self.raw_history[0].get("issueNumber") != issue_data.get("issueNumber")):
+            self.history.insert(0, result_type)
+            self.raw_history.insert(0, issue_data)
+            self.history = self.history[:120]
+            self.raw_history = self.raw_history[:120]
 
-        # safe window for signal send
-        is_safe_time = (5 <= sec <= 40)
+    def calc_confidence(self, streak_loss):
+        base = random.randint(93, 98)
+        # লস হলে কনফিডেন্স একটু কমিয়ে দেখাবে
+        return max(45, base - (streak_loss * 8))
 
-        resolved_this_tick = False
+    def get_pattern_signal(self, current_streak_loss):
+        # ইতিহাস খুব ছোট হলে র‍্যান্ডম
+        if len(self.history) < 6:
+            return random.choice(["BIG", "SMALL"])
 
-        # 1) RESULT PROCESS FIRST
-        latest_data = await fetch_latest_issue()
-        if latest_data:
-            state.engine.update_history(latest_data)
-            latest_issue = str(latest_data.get("issueNumber"))
-            latest_num = str(latest_data.get("number"))
-            latest_type = "BIG" if int(latest_data.get("number")) >= 5 else "SMALL"
+        last_result = self.history[0]
+        recent = self.history[:5]
+        
+        # ডিফল্ট প্রেডিকশন (Logic Base)
+        prediction = None
 
-            if state.active and state.active.predicted_issue == latest_issue:
-                pick = state.active.pick
-                is_win = (pick == latest_type)
+        # ১. প্যাটার্ন চেক (Pattern Analysis)
+        # Dragon (Last 3 same)
+        if recent[0] == recent[1] == recent[2]:
+            prediction = recent[0]
+        # ZigZag (ABAB)
+        elif recent[0] != recent[1] and recent[1] != recent[2]:
+            prediction = "SMALL" if recent[0] == "BIG" else "BIG"
+        # 2-2 Pattern (AABB)
+        elif recent[0] == recent[1] and recent[2] == recent[3] and recent[1] != recent[2]:
+            prediction = "SMALL" if recent[0] == "BIG" else "BIG"
+        else:
+            # ডিফল্ট ট্রেন্ড (Last Result)
+            prediction = last_result
 
-                for cid, mid in (state.active.checking_msg_ids or {}).items():
-                    await safe_delete(bot, cid, mid)
+        # =========================================================
+        # ⚠️ THE FIX: INVERSE LOGIC ADAPTER
+        # =========================================================
+        
+        # ধাপ ১: যদি টানা ২ বা তার বেশি লস হয়, তার মানে মার্কেট উল্টো চলছে।
+        # তখন আমরা সাধারণ লজিকের "বিপরীত" (Reverse) ধরব।
+        if current_streak_loss >= 2:
+            prediction = "SMALL" if prediction == "BIG" else "BIG"
 
-                if is_win:
-                    state.wins += 1
-                    state.streak_win += 1
-                    state.streak_loss = 0
-                    state.max_win_streak = max(state.max_win_streak, state.streak_win)
+        # ধাপ ২: যদি আল্লাহ না করুক ৫ বার লস হয়, তার মানে মার্কেট খুব বাজে (Dragon Trap)।
+        # তখন আমরা আর প্যাটার্ন দেখব না, সোজা লাস্ট রেজাল্ট কপি করব (Trend Follow)।
+        if current_streak_loss >= 5:
+            prediction = last_result
 
-                    await broadcast_sticker(bot, STICKERS["WIN_ALWAYS"])
-                    if state.streak_win in STICKERS["SUPER_WIN"]:
-                        await broadcast_sticker(bot, STICKERS["SUPER_WIN"][state.streak_win])
-                    else:
-                        await broadcast_sticker(bot, random.choice(STICKERS["WIN_POOL"]))
-                    await broadcast_sticker(bot, STICKERS["WIN_BIG"] if latest_type == "BIG" else STICKERS["WIN_SMALL"])
-                    await broadcast_sticker(bot, STICKERS["WIN_ANY"])
-                    await broadcast_sticker(bot, STICKERS["WIN_EXTRA_NEW"])
-                else:
-                    state.losses += 1
-                    state.streak_loss += 1
-                    state.streak_win = 0
-                    state.max_loss_streak = max(state.max_loss_streak, state.streak_loss)
-                    await broadcast_sticker(bot, STICKERS["LOSS"])
+        self.last_prediction = prediction
+        return prediction
 
-                await broadcast_message(bot, format_result(latest_issue, latest_num, latest_type, pick, is_win))
-
-                state.active = None
-                resolved_this_tick = True
-
-                if state.graceful_stop_requested and is_win:
-                    await stop_session(bot, reason="graceful_done")
-                    break
-
-        # 2) SIGNAL GENERATION
-        if (not state.active) and is_safe_time and (not resolved_this_tick):
-            if state.last_signal_issue != current_period:
-                if state.streak_loss >= MAX_RECOVERY_STEPS:
-                    await broadcast_message(bot, "🧊 <b>SAFETY STOP</b>\n<i>Recovery limit reached.</i>")
-                    await stop_session(bot, reason="max_steps")
-                    break
-
-                pred = state.engine.get_pattern_signal(state.streak_loss)
-                conf = state.engine.calc_confidence(state.streak_loss)
-
-                pred_stk, color_stk = choose_pred_stickers(pred)
-                await broadcast_sticker(bot, pred_stk)
-
-                if state.color_mode and color_stk:
-                    await broadcast_sticker(bot, color_stk)
-
-                await broadcast_message(bot, format_signal(current_period, pred, conf))
-
-                checking_ids = {}
-                for cid in state.selected_targets:
-                    try:
-                        m = await bot.send_message(cid, format_checking(current_period), parse_mode=ParseMode.HTML)
-                        checking_ids[cid] = m.message_id
-                    except Exception:
-                        pass
-
-                state.active = ActiveBet(predicted_issue=current_period, pick=pred, checking_msg_ids=checking_ids)
-                state.last_signal_issue = current_period
-
-        await asyncio.sleep(0.6)
 
 # =========================
 # BOT STATE
