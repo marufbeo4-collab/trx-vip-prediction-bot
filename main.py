@@ -25,7 +25,8 @@ from telegram.ext import (
 # =========================
 # CONFIG
 # =========================
-BOT_TOKEN = "8385209285:AAGl6LuevVteKoAh17f039_xfFrJ7SNxIwE"
+# আপনার নতুন টোকেনটি এখানে নিশ্চিত করুন
+BOT_TOKEN = "8385209285:AAH2s39fhZuR4g6FHCPJmk7993O_uFeeEoE"
 
 BRAND_NAME = "𝗧𝗥𝗫 𝗥𝗔𝗞𝗜𝗕 𝗩𝗜𝗣 𝗦𝗜𝗚𝗡𝗔𝗟🔥"
 CHANNEL_LINK = "https://t.me/TRX_RAKIB_trader"
@@ -51,6 +52,27 @@ FETCH_TIMEOUT = 5.5
 FETCH_RETRY_SLEEP = 0.55
 
 # =========================
+# FLASK SERVER (RENDER FIX)
+# =========================
+app = Flask("")
+
+@app.route("/")
+def home():
+    return "Bot is Running Successfully!"
+
+def run_http():
+    # Render assigns a PORT via environment variable
+    port = int(os.environ.get("PORT", 10000))
+    try:
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"Flask Error: {e}")
+
+def keep_alive():
+    t = Thread(target=run_http, daemon=True)
+    t.start()
+
+# =========================
 # AUTO SCHEDULE CONFIG (BD TIME)
 # =========================
 AUTO_WINDOWS = [
@@ -63,8 +85,11 @@ AUTO_WINDOWS = [
 ]
 
 def _hhmm_to_minutes(hhmm: str) -> int:
-    h, m = hhmm.split(":")
-    return int(h) * 60 + int(m)
+    try:
+        h, m = hhmm.split(":")
+        return int(h) * 60 + int(m)
+    except:
+        return 0
 
 AUTO_WINDOWS_MIN = [(_hhmm_to_minutes(a), _hhmm_to_minutes(b)) for a, b in AUTO_WINDOWS]
 
@@ -142,25 +167,7 @@ STICKERS = {
 }
 
 # =========================
-# FLASK KEEP ALIVE
-# =========================
-app = Flask("")
-
-@app.route("/")
-def home():
-    return "ALIVE"
-
-def run_http():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-def keep_alive():
-    t = Thread(target=run_http, daemon=True)
-    t.start()
-
-
-# =========================
-# PREDICTION ENGINE (LOGIC INSERTED HERE)
+# PREDICTION ENGINE (HYBRID LOGIC)
 # =========================
 class PredictionEngine:
     def __init__(self):
@@ -183,42 +190,33 @@ class PredictionEngine:
 
     def calc_confidence(self, streak_loss):
         base = random.randint(93, 98)
-        # লস হলে কনফিডেন্স একটু কমিয়ে দেখাবে
         return max(45, base - (streak_loss * 8))
 
     def get_pattern_signal(self, current_streak_loss):
-        # ইতিহাস খুব ছোট হলে র‍্যান্ডম
         if len(self.history) < 6:
             return random.choice(["BIG", "SMALL"])
 
         last_result = self.history[0]
         recent = self.history[:5]
         
-        # --- PHASE 1: NORMAL PATTERN ANALYSIS ---
         prediction = None
-
-        # 1. Dragon (Last 3 same) -> Predict Same
+        # 1. Dragon
         if recent[0] == recent[1] == recent[2]:
             prediction = recent[0]
-        # 2. ZigZag (ABAB) -> Predict Flip
+        # 2. ZigZag
         elif recent[0] != recent[1] and recent[1] != recent[2]:
             prediction = "SMALL" if recent[0] == "BIG" else "BIG"
-        # 3. 2-2 Pattern (AABB) -> Predict Flip
+        # 3. 2-2 Pattern
         elif recent[0] == recent[1] and recent[2] == recent[3] and recent[1] != recent[2]:
             prediction = "SMALL" if recent[0] == "BIG" else "BIG"
         else:
-            # Default Trend
             prediction = last_result 
 
-        # --- PHASE 2: INVERSE LOGIC (LOSS >= 2) ---
-        # যদি টানা ২ বা তার বেশি লস হয়, তার মানে মার্কেট উল্টো চলছে।
-        # তখন আমরা সাধারণ লজিকের "বিপরীত" (Reverse) ধরব।
+        # Reverse Logic (Loss >= 2)
         if current_streak_loss >= 2:
             prediction = "SMALL" if prediction == "BIG" else "BIG"
 
-        # --- PHASE 3: SAFETY / DRAGON TRAP (LOSS >= 5) ---
-        # যদি ৫ বার লস হয়, তার মানে মার্কেট খুব বাজে।
-        # তখন সোজা লাস্ট রেজাল্ট কপি করব (Trend Follow)।
+        # Safety Logic (Loss >= 5)
         if current_streak_loss >= 5:
             prediction = last_result
 
@@ -580,7 +578,6 @@ async def engine_loop(context: ContextTypes.DEFAULT_TYPE, my_session: int):
                 await stop_session(bot, reason="max_steps")
                 break
             
-            # 🔥 USING THE NEW LOGIC HERE 🔥
             pred = state.engine.get_pattern_signal(state.streak_loss)
             conf = state.engine.calc_confidence(state.streak_loss)
             
@@ -610,6 +607,8 @@ async def engine_loop(context: ContextTypes.DEFAULT_TYPE, my_session: int):
 # SCHEDULER LOOP
 # =========================
 async def scheduler_loop(app: Application):
+    # Initial delay to prevent startup freeze
+    await asyncio.sleep(2)
     while True:
         try:
             now = datetime.now(BD_TZ)
@@ -617,12 +616,10 @@ async def scheduler_loop(app: Application):
             
             if state.auto_schedule_enabled:
                 if in_window and (not state.running):
-                    # Auto start default 1 MIN
                     await start_session(app.bot, mode="1M", started_by_schedule=True)
                     app.create_task(engine_loop(app, state.session_id))
                 
                 elif (not in_window) and state.running and state.started_by_schedule:
-                    # Graceful stop logic
                     state.graceful_stop_requested = True
                     if state.streak_loss == 0 and state.active is None:
                         await stop_session(app.bot, reason="schedule_end")
@@ -701,17 +698,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(panel_text(), parse_mode=ParseMode.HTML, reply_markup=selector_markup())
 
 async def post_init(app: Application):
-    app.create_task(scheduler_loop(app))
+    # FIXED: Using asyncio.create_task to avoid PTBUserWarning about app not running
+    asyncio.create_task(scheduler_loop(app))
 
 def main():
     logging.basicConfig(level=logging.WARNING)
-    keep_alive()
+    keep_alive() # Start Flask server immediately
+    
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("panel", cmd_panel))
     application.add_handler(CallbackQueryHandler(on_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.run_polling(close_loop=False)
+    
+    # FIXED: drop_pending_updates=True prevents timeout on startup if bot was off for long
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
