@@ -23,9 +23,9 @@ from telegram.ext import (
 )
 
 # =========================
-# CONFIG (NO CHANGE)
+# CONFIG
 # =========================
-BOT_TOKEN = "8385209285:AAH2s39fhZuR4g6FHCPJmk7993O_uFeeEoE"
+BOT_TOKEN = "8385209285:AAGl6LuevVteKoAh17f039_xfFrJ7SNxIwE"
 
 BRAND_NAME = "𝗧𝗥𝗫 𝗥𝗔𝗞𝗜𝗕 𝗩𝗜𝗣 𝗦𝗜𝗚𝗡𝗔𝗟🔥"
 CHANNEL_LINK = "https://t.me/TRX_RAKIB_trader"
@@ -34,6 +34,7 @@ TARGETS = {
     "MAIN_GROUP": -1003102333062,
 }
 
+# TRX / AR Lottery API
 API_1M = "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
 API_30S = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
@@ -75,7 +76,7 @@ def is_now_in_any_window(now: datetime) -> bool:
     return False
 
 # =========================
-# MISSING FUNCTION FIXED
+# PASSWORD SYNC
 # =========================
 def _get_password_sync():
     try:
@@ -101,14 +102,20 @@ STICKERS = {
     "PRED_1M_SMALL": "CAACAgUAAxkBAAEQTr9pcwrC7iH-Ei5xHz2QapE-DFkgLQACXxkAAoNWmFeTSY6h7y7VlzgE",
     "PRED_30S_BIG": "CAACAgUAAxkBAAEQTuZpczxpS6btJ7B4he4btOzGXKbXWwAC2RMAAkYqGFTKz4vHebETgDgE",
     "PRED_30S_SMALL": "CAACAgUAAxkBAAEQTuVpczxpbSG9e1hL9__qlNP1gBnIsQAC-RQAAmC3GVT5I4duiXGKpzgE",
+    
+    "COLOR_GREEN": "CAACAgUAAxkBAAEQUCppc4JDHWjTzBCFIOx2Hcjtz9UnnAACzRwAAnR3oVejA9DVGekyYTgE",
+    "COLOR_RED": "CAACAgUAAxkBAAEQUClpc4JDd9n_ZQ45hPk-a3tEjFXnugACbhgAAqItoVd2zRs4VkXOHDgE",
+
     "START_30S": "CAACAgUAAxkBAAEQUrNpdYvDXIBff9O8TCRlI3QYJgfGiAAC1RQAAjGFMVfjtqxbDWbuEzgE",
     "START_1M": "CAACAgUAAxkBAAEQUrRpdYvESSIrn4-Lm936I6F8_BaN-wACChYAAuBHOVc6YQfcV-EKqjgE",
     "START_END_ALWAYS": "CAACAgUAAxkBAAEQTjRpcmWdzXBzA7e9KNz8QgTI6NXlxgACuRcAAh2x-FaJNjq4QG_DujgE",
+    
     "WIN_BIG": "CAACAgUAAxkBAAEQTjhpcmXknd41yv99at8qxdgw3ivEkAACyRUAAraKsFSky2Ut1kt-hjgE",
     "WIN_SMALL": "CAACAgUAAxkBAAEQTjlpcmXkF8R0bNj0jb1Xd8NF-kaTSQAC7DQAAhnRsVTS3-Z8tj-kajgE",
     "WIN_ALWAYS": "CAACAgUAAxkBAAEQUTZpdFC4094KaOEdiE3njwhAGVCuBAAC4hoAAt0EqVQXmdKVLGbGmzgE",
     "WIN_ANY": "CAACAgUAAxkBAAEQTydpcz9Kv1L2PJyNlbkcZpcztKKxfQACDRsAAoq1mFcAAYLsJ33TdUA4BA",
     "LOSS": "CAACAgUAAxkBAAEQTytpcz9VQoHyZ5ClbKSqKCJbpqX6yQACahYAAl1wAAFUL9xOdyh8UL84BA",
+    
     "WIN_POOL": [
         "CAACAgUAAxkBAAEQTzNpcz9ns8rx_5xmxk4HHQOJY2uUQQAC3RoAAuCpcFbMKj0VkxPOdTgE",
         "CAACAgUAAxkBAAEQTzRpcz9ni_I4CjwFZ3iSt4xiXxFgkwACkxgAAnQKcVYHd8IiRqfBXTgE",
@@ -134,7 +141,6 @@ STICKERS = {
     },
 }
 
-
 # =========================
 # FLASK KEEP ALIVE
 # =========================
@@ -154,7 +160,7 @@ def keep_alive():
 
 
 # =========================
-# PREDICTION ENGINE (UPDATED: HYBRID REVERSE)
+# PREDICTION ENGINE (LOGIC INSERTED HERE)
 # =========================
 class PredictionEngine:
     def __init__(self):
@@ -177,9 +183,11 @@ class PredictionEngine:
 
     def calc_confidence(self, streak_loss):
         base = random.randint(93, 98)
+        # লস হলে কনফিডেন্স একটু কমিয়ে দেখাবে
         return max(45, base - (streak_loss * 8))
 
     def get_pattern_signal(self, current_streak_loss):
+        # ইতিহাস খুব ছোট হলে র‍্যান্ডম
         if len(self.history) < 6:
             return random.choice(["BIG", "SMALL"])
 
@@ -188,25 +196,29 @@ class PredictionEngine:
         
         # --- PHASE 1: NORMAL PATTERN ANALYSIS ---
         prediction = None
-        # Dragon
+
+        # 1. Dragon (Last 3 same) -> Predict Same
         if recent[0] == recent[1] == recent[2]:
             prediction = recent[0]
-        # ZigZag
+        # 2. ZigZag (ABAB) -> Predict Flip
         elif recent[0] != recent[1] and recent[1] != recent[2]:
             prediction = "SMALL" if recent[0] == "BIG" else "BIG"
-        # AABB
+        # 3. 2-2 Pattern (AABB) -> Predict Flip
         elif recent[0] == recent[1] and recent[2] == recent[3] and recent[1] != recent[2]:
             prediction = "SMALL" if recent[0] == "BIG" else "BIG"
         else:
-            prediction = last_result # Trend
+            # Default Trend
+            prediction = last_result 
 
-        # --- PHASE 2: INVERSE TRAP FIX (LOSS 2+) ---
-        # যদি ২ বার লস হয়, তার মানে মার্কেট উল্টা চলছে। আমরাও উল্টা ধরব।
+        # --- PHASE 2: INVERSE LOGIC (LOSS >= 2) ---
+        # যদি টানা ২ বা তার বেশি লস হয়, তার মানে মার্কেট উল্টো চলছে।
+        # তখন আমরা সাধারণ লজিকের "বিপরীত" (Reverse) ধরব।
         if current_streak_loss >= 2:
             prediction = "SMALL" if prediction == "BIG" else "BIG"
 
-        # --- PHASE 3: SAFETY MODE (LOSS 5+) ---
-        # ৫ লস হলে সোজা ট্রেন্ড কপি
+        # --- PHASE 3: SAFETY / DRAGON TRAP (LOSS >= 5) ---
+        # যদি ৫ বার লস হয়, তার মানে মার্কেট খুব বাজে।
+        # তখন সোজা লাস্ট রেজাল্ট কপি করব (Trend Follow)।
         if current_streak_loss >= 5:
             prediction = last_result
 
@@ -218,7 +230,7 @@ class PredictionEngine:
 # BOT STATE
 # =========================
 def now_bd_str() -> str:
-    return datetime.now(BD_TZ).strftime("%H:%M:%S")
+    return datetime.now(BD_TZ).strftime("%I:%M:%S %p")
 
 def mode_label(mode: str) -> str:
     return "30 SEC" if mode == "30S" else "1 MIN"
@@ -255,7 +267,6 @@ class BotState:
     color_mode: bool = False
     graceful_stop_requested: bool = False
     
-    # ✅ Auto Schedule Default ON
     auto_schedule_enabled: bool = True
     started_by_schedule: bool = False
 
@@ -569,6 +580,7 @@ async def engine_loop(context: ContextTypes.DEFAULT_TYPE, my_session: int):
                 await stop_session(bot, reason="max_steps")
                 break
             
+            # 🔥 USING THE NEW LOGIC HERE 🔥
             pred = state.engine.get_pattern_signal(state.streak_loss)
             conf = state.engine.calc_confidence(state.streak_loss)
             
