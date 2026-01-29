@@ -3,6 +3,8 @@ import logging
 import os
 import random
 import time
+import json
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from threading import Thread
@@ -34,7 +36,7 @@ TARGETS = {
     "MAIN_GROUP": -1003102333062,
 }
 
-# TRX / AR Lottery API
+# TRX / AR Lottery API Links
 API_1M = "https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json"
 API_30S = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
@@ -60,7 +62,6 @@ def home():
     return "Bot is Running Successfully!"
 
 def run_http():
-    # Render assigns a PORT via environment variable
     port = int(os.environ.get("PORT", 10000))
     try:
         app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
@@ -72,15 +73,11 @@ def keep_alive():
     t.start()
 
 # =========================
-# AUTO SCHEDULE CONFIG (BD TIME)
+# AUTO SCHEDULE CONFIG
 # =========================
 AUTO_WINDOWS = [
-    ("10:00", "10:30"),
-    ("12:00", "12:30"),
-    ("15:00", "15:30"),
-    ("19:00", "19:30"),
-    ("21:00", "21:30"),
-    ("23:00", "23:30"),
+    ("10:00", "10:30"), ("12:00", "12:30"), ("15:00", "15:30"),
+    ("19:00", "19:30"), ("21:00", "21:30"), ("23:00", "23:30"),
 ]
 
 def _hhmm_to_minutes(hhmm: str) -> int:
@@ -117,7 +114,6 @@ def _get_password_sync():
 async def get_live_password():
     return await asyncio.to_thread(_get_password_sync)
 
-
 # =========================
 # STICKERS
 # =========================
@@ -126,20 +122,16 @@ STICKERS = {
     "PRED_1M_SMALL": "CAACAgUAAxkBAAEQTr9pcwrC7iH-Ei5xHz2QapE-DFkgLQACXxkAAoNWmFeTSY6h7y7VlzgE",
     "PRED_30S_BIG": "CAACAgUAAxkBAAEQTuZpczxpS6btJ7B4he4btOzGXKbXWwAC2RMAAkYqGFTKz4vHebETgDgE",
     "PRED_30S_SMALL": "CAACAgUAAxkBAAEQTuVpczxpbSG9e1hL9__qlNP1gBnIsQAC-RQAAmC3GVT5I4duiXGKpzgE",
-    
     "COLOR_GREEN": "CAACAgUAAxkBAAEQUCppc4JDHWjTzBCFIOx2Hcjtz9UnnAACzRwAAnR3oVejA9DVGekyYTgE",
     "COLOR_RED": "CAACAgUAAxkBAAEQUClpc4JDd9n_ZQ45hPk-a3tEjFXnugACbhgAAqItoVd2zRs4VkXOHDgE",
-
     "START_30S": "CAACAgUAAxkBAAEQUrNpdYvDXIBff9O8TCRlI3QYJgfGiAAC1RQAAjGFMVfjtqxbDWbuEzgE",
     "START_1M": "CAACAgUAAxkBAAEQUrRpdYvESSIrn4-Lm936I6F8_BaN-wACChYAAuBHOVc6YQfcV-EKqjgE",
     "START_END_ALWAYS": "CAACAgUAAxkBAAEQTjRpcmWdzXBzA7e9KNz8QgTI6NXlxgACuRcAAh2x-FaJNjq4QG_DujgE",
-    
     "WIN_BIG": "CAACAgUAAxkBAAEQTjhpcmXknd41yv99at8qxdgw3ivEkAACyRUAAraKsFSky2Ut1kt-hjgE",
     "WIN_SMALL": "CAACAgUAAxkBAAEQTjlpcmXkF8R0bNj0jb1Xd8NF-kaTSQAC7DQAAhnRsVTS3-Z8tj-kajgE",
     "WIN_ALWAYS": "CAACAgUAAxkBAAEQUTZpdFC4094KaOEdiE3njwhAGVCuBAAC4hoAAt0EqVQXmdKVLGbGmzgE",
     "WIN_ANY": "CAACAgUAAxkBAAEQTydpcz9Kv1L2PJyNlbkcZpcztKKxfQACDRsAAoq1mFcAAYLsJ33TdUA4BA",
     "LOSS": "CAACAgUAAxkBAAEQTytpcz9VQoHyZ5ClbKSqKCJbpqX6yQACahYAAl1wAAFUL9xOdyh8UL84BA",
-    
     "WIN_POOL": [
         "CAACAgUAAxkBAAEQTzNpcz9ns8rx_5xmxk4HHQOJY2uUQQAC3RoAAuCpcFbMKj0VkxPOdTgE",
         "CAACAgUAAxkBAAEQTzRpcz9ni_I4CjwFZ3iSt4xiXxFgkwACkxgAAnQKcVYHd8IiRqfBXTgE",
@@ -166,7 +158,7 @@ STICKERS = {
 }
 
 # =========================
-# PREDICTION ENGINE (UPDATED: HYBRID REVERSE LOGIC)
+# PREDICTION ENGINE
 # =========================
 class PredictionEngine:
     def __init__(self):
@@ -189,51 +181,32 @@ class PredictionEngine:
 
     def calc_confidence(self, streak_loss):
         base = random.randint(93, 98)
-        # লস হলে কনফিডেন্স একটু কমিয়ে দেখাবে
         return max(45, base - (streak_loss * 8))
 
     def get_pattern_signal(self, current_streak_loss):
-        # ইতিহাস খুব ছোট হলে র‍্যান্ডম
         if len(self.history) < 6:
             return random.choice(["BIG", "SMALL"])
 
         last_result = self.history[0]
         recent = self.history[:5]
-        
-        # ডিফল্ট প্রেডিকশন (Logic Base)
         prediction = None
 
-        # ১. প্যাটার্ন চেক (Pattern Analysis)
-        # Dragon (Last 3 same)
         if recent[0] == recent[1] == recent[2]:
             prediction = recent[0]
-        # ZigZag (ABAB)
         elif recent[0] != recent[1] and recent[1] != recent[2]:
             prediction = "SMALL" if recent[0] == "BIG" else "BIG"
-        # 2-2 Pattern (AABB)
         elif recent[0] == recent[1] and recent[2] == recent[3] and recent[1] != recent[2]:
             prediction = "SMALL" if recent[0] == "BIG" else "BIG"
         else:
-            # ডিফল্ট ট্রেন্ড (Last Result)
             prediction = last_result
 
-        # =========================================================
-        # ⚠️ THE FIX: INVERSE LOGIC ADAPTER
-        # =========================================================
-        
-        # ধাপ ১: যদি টানা ২ বা তার বেশি লস হয়, তার মানে মার্কেট উল্টো চলছে।
-        # তখন আমরা সাধারণ লজিকের "বিপরীত" (Reverse) ধরব।
         if current_streak_loss >= 2:
             prediction = "SMALL" if prediction == "BIG" else "BIG"
-
-        # ধাপ ২: যদি আল্লাহ না করুক ৫ বার লস হয়, তার মানে মার্কেট খুব বাজে (Dragon Trap)।
-        # তখন আমরা আর প্যাটার্ন দেখব না, সোজা লাস্ট রেজাল্ট কপি করব (Trend Follow)।
         if current_streak_loss >= 5:
             prediction = last_result
 
         self.last_prediction = prediction
         return prediction
-
 
 # =========================
 # BOT STATE
@@ -260,60 +233,84 @@ class BotState:
     active: Optional[ActiveBet] = None
     last_result_issue: Optional[str] = None
     last_signal_issue: Optional[str] = None
-
     wins: int = 0
     losses: int = 0
     streak_win: int = 0
     streak_loss: int = 0
     max_win_streak: int = 0
     max_loss_streak: int = 0
-
     unlocked: bool = False
     expected_password: str = PASSWORD_FALLBACK
-
     selected_targets: List[int] = field(default_factory=lambda: [TARGETS["MAIN_GROUP"]])
-
     color_mode: bool = False
     graceful_stop_requested: bool = False
-    
     auto_schedule_enabled: bool = True
     started_by_schedule: bool = False
-
     stop_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 state = BotState()
 
-
-# =========================
-# FETCH
-# =========================
+# ==================================================
+# 🔥 API FETCH SYSTEM: PENTAGON PROXY LOGIC 🔥
+# ==================================================
 def _fetch_latest_issue_sync(mode: str) -> Optional[dict]:
-    base_url = API_30S if mode == "30S" else API_1M
-    ts = int(time.time() * 1000)
-    gateways = [
-        f"{base_url}?t={ts}",
-        f"https://corsproxy.io/?{base_url}?t={ts}",
-        f"https://api.allorigins.win/raw?url={base_url}",
-        f"https://thingproxy.freeboard.io/fetch/{base_url}",
-        f"https://api.codetabs.com/v1/proxy?quest={base_url}",
+    # 1. Target URL based on Mode (30S or 1M)
+    target_api = API_30S if mode == "30S" else API_1M
+    
+    # 2. Proxy Gateways
+    proxies = [
+        "https://api.codetabs.com/v1/proxy?quest=",       # Gateway 1 (Fastest)
+        "https://corsproxy.io/?",                         # Gateway 2 (Reliable)
+        "https://api.allorigins.win/raw?url=",            # Gateway 3 (Raw JSON)
+        "https://thingproxy.freeboard.io/fetch/",         # Gateway 4 (Backup)
+        "https://api.allorigins.win/get?url="             # Gateway 5 (JSON Wrapper)
     ]
+
+    # 3. Anti-Caching Timestamp
+    timestamp = int(time.time() * 1000)
+    target_with_params = f"{target_api}?pageNo=1&pageSize=5&t={timestamp}"
+    
+    # Common Headers
     headers = {
         "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/{random.randint(112, 123)}.0.0.0 Safari/537.36",
         "Referer": "https://dkwin9.com/",
     }
-    for url in gateways:
+
+    # 4. Try Proxies Sequentially
+    for proxy_base in proxies:
         try:
-            r = requests.get(url, headers=headers, timeout=FETCH_TIMEOUT)
-            if r.status_code != 200: continue
-            data = r.json()
-            if data and "data" in data and "list" in data["data"] and data["data"]["list"]:
-                return data["data"]["list"][0]
-        except: continue
+            # Encoding the target URL correctly for the proxy
+            encoded_target = urllib.parse.quote(target_with_params, safe='')
+            final_url = f"{proxy_base}{encoded_target}"
+            
+            # Special case for corsproxy.io (sometimes prefers raw url suffix)
+            if "corsproxy.io" in proxy_base:
+                final_url = f"{proxy_base}{target_with_params}"
+
+            response = requests.get(final_url, headers=headers, timeout=FETCH_TIMEOUT)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                # Smart Parsing for AllOrigins Wrapper (Gateway 5)
+                if "contents" in data and "api.allorigins.win/get" in proxy_base:
+                    try:
+                        data = json.loads(data["contents"])
+                    except:
+                        # Sometimes contents is already the dict or a weird string
+                        pass 
+
+                # Validate Data Structure
+                if data and "data" in data and "list" in data["data"] and data["data"]["list"]:
+                    return data["data"]["list"][0]
+
+        except Exception:
+            continue # Try next proxy silently
+
     return None
 
 async def fetch_latest_issue(mode: str) -> Optional[dict]:
     return await asyncio.to_thread(_fetch_latest_issue_sync, mode)
-
 
 # =========================
 # MESSAGES
@@ -398,7 +395,6 @@ def format_summary() -> str:
         f"🔗 <b>REJOIN</b> ➜ <a href='{CHANNEL_LINK}'>{CHANNEL_LINK}</a>"
     )
 
-
 # =========================
 # PANEL
 # =========================
@@ -416,7 +412,6 @@ def panel_text() -> str:
     color = "🎨 <b>COLOR:</b> ON" if state.color_mode else "🎨 <b>COLOR:</b> OFF"
     auto = "⏰ <b>AUTO:</b> ON" if state.auto_schedule_enabled else "⏰ <b>AUTO:</b> OFF"
     grace = "🧠 <b>STOP AFTER RECOVER:</b> ✅" if state.graceful_stop_requested else "🧠 <b>STOP AFTER RECOVER:</b> ❌"
-    
     origin = "🧩 <b>SESSION:</b> AUTO" if (state.running and state.started_by_schedule) else "🧩 <b>SESSION:</b> MANUAL"
 
     return (
@@ -460,7 +455,6 @@ def selector_markup() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔄 Refresh Panel", callback_data="REFRESH_PANEL")]
     ]
     return InlineKeyboardMarkup(rows)
-
 
 # =========================
 # HELPERS & SESSION
@@ -523,7 +517,6 @@ async def start_session(bot, mode: str, started_by_schedule: bool = False):
     stk = STICKERS["START_30S"] if mode == "30S" else STICKERS["START_1M"]
     await broadcast_sticker(bot, stk)
     await broadcast_sticker(bot, STICKERS["START_END_ALWAYS"])
-
 
 # =========================
 # ENGINE LOOP
@@ -613,12 +606,10 @@ async def engine_loop(context: ContextTypes.DEFAULT_TYPE, my_session: int):
             state.last_signal_issue = next_issue
         await asyncio.sleep(FAST_LOOP_30S if state.mode == "30S" else FAST_LOOP_1M)
 
-
 # =========================
 # SCHEDULER LOOP
 # =========================
 async def scheduler_loop(app: Application):
-    # Initial delay to prevent startup freeze
     await asyncio.sleep(2)
     while True:
         try:
@@ -636,7 +627,6 @@ async def scheduler_loop(app: Application):
                         await stop_session(app.bot, reason="schedule_end")
         except: pass
         await asyncio.sleep(10)
-
 
 # =========================
 # COMMANDS & MAIN
@@ -709,21 +699,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(panel_text(), parse_mode=ParseMode.HTML, reply_markup=selector_markup())
 
 async def post_init(app: Application):
-    # FIXED: Using asyncio.create_task to avoid PTBUserWarning about app not running
     asyncio.create_task(scheduler_loop(app))
 
 def main():
     logging.basicConfig(level=logging.WARNING)
-    keep_alive() # Start Flask server immediately
-    
+    keep_alive() 
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
-    
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("panel", cmd_panel))
     application.add_handler(CallbackQueryHandler(on_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    
-    # FIXED: drop_pending_updates=True prevents timeout on startup if bot was off for long
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
